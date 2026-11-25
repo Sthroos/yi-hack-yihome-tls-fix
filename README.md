@@ -84,7 +84,7 @@ but are untested. Reports welcome.
 
 ## Install
 
-One command per camera, run from a Linux/macOS PC (or WSL):
+One command per camera, run from a Linux PC (or WSL on Windows; macOS is untested):
 
 ```sh
 git clone https://github.com/Sthroos/yi-hack-yihome-tls-fix
