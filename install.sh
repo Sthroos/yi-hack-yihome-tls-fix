@@ -72,6 +72,8 @@ push "$PKI/server.crt"            "$DEST/server.crt"
 push "$PKI/server.key"            "$DEST/server.key"
 push "$CA_BUNDLE"                 "$DEST/ca-bundle.pem"
 push "$HERE/camera/start.sh"      "$DEST/start.sh"
+push "$HERE/camera/blocklist"     "$DEST/blocklist"
+push "$HERE/camera/blocked-ips"   "$DEST/blocked-ips"
 push "$HERE/camera/install-ca.sh" /tmp/yi-install-ca.sh
 push "$PKI/local-ca.crt"          /tmp/yi-local-ca.crt
 "${SSH[@]}" "printf '%s\n' '$UPSTREAM' > $DEST/upstream_host && chmod 755 $DEST/yi-tls-bridge $DEST/start.sh"

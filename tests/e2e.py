@@ -191,11 +191,26 @@ def dns_query(name, qtype=1):
     return an, (socket.inet_ntoa(r[-4:]) if an else None)
 
 
-def run_bridge(binary, qemu, d, ca_bundle, resolv, dns=False, port=UPSTREAM_PORT):
+def dns_rcode(name, qtype=1):
+    q = struct.pack(">HHHHHH", 0x4321, 0x0100, 1, 0, 0, 0)
+    for label in name.split("."):
+        q += bytes([len(label)]) + label.encode()
+    q += b"\x00" + struct.pack(">HH", qtype, 1)
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    s.settimeout(15)
+    s.sendto(q, ("127.0.0.1", 53))
+    r, _ = s.recvfrom(1500)
+    s.close()
+    return r[3] & 0x0F
+
+
+def run_bridge(binary, qemu, d, ca_bundle, resolv, dns=False, port=UPSTREAM_PORT, blocklist=None):
     cmd = [binary, "-c", os.path.join(d, "local.crt"), "-k", os.path.join(d, "local.key"),
            "-a", os.path.join(d, ca_bundle), "-u", HOST, "-P", str(port), "-r", resolv]
     if dns:
         cmd.append("-d")
+    if blocklist:
+        cmd += ["-b", blocklist]
     if qemu:
         cmd = ["qemu-arm"] + cmd
     p = subprocess.Popen(cmd, stderr=subprocess.PIPE)
@@ -270,13 +285,20 @@ def main():
         with open(resolv, "w") as f:
             f.write(f"nameserver 127.0.0.1\nnameserver {DNS_IP}\n")   # loopback must be skipped
         up = start_upstream(d, "chain.pem", "leaf.key")
-        br = run_bridge(binary, qemu, d, "bundle-r46.pem", resolv, dns=True)
+        blocklist = os.path.join(d, "blocklist")
+        with open(blocklist, "w") as f:
+            f.write("# comment\nblocked.example\n.evil.example   # trailing comment\n")
+        br = run_bridge(binary, qemu, d, "bundle-r46.pem", resolv, dns=True, blocklist=blocklist)
         try:
             checks = [
                 ("dns: upstream host A -> 127.0.0.1", dns_query(HOST, 1) == (1, "127.0.0.1")),
                 ("dns: upstream host AAAA -> empty", dns_query(HOST, 28)[0] == 0),
                 ("dns: other name forwarded", dns_query("other.example", 1)[1] == UPSTREAM_IP),
                 ("dns mode: legacy request still bridged", BODY in legacy_get(d, "AES128-SHA")),
+                ("blocklist: exact name -> NXDOMAIN", dns_rcode("blocked.example") == 3),
+                ("blocklist: '.domain' covers subdomain", dns_rcode("cdn.evil.example", 28) == 3),
+                ("blocklist: '.domain' covers domain itself", dns_rcode("EVIL.example") == 3),
+                ("blocklist: similar name not blocked", dns_query("notevil.example", 1)[1] == UPSTREAM_IP),
             ]
         finally:
             log = stop(br)

@@ -51,6 +51,17 @@ restore_dns() {
 [ -f /tmp/hosts ] || echo "127.0.0.1 localhost" > /tmp/hosts
 grep -q "[[:space:]]$UPSTREAM\$" /tmp/hosts || echo "127.0.0.1 $UPSTREAM" >> /tmp/hosts
 
+# Block firmware-hardcoded IPs with local reject routes (BusyBox route; ip(8) as fallback).
+if [ -f "$BASE/blocked-ips" ]; then
+    grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' "$BASE/blocked-ips" | while read -r ip; do
+        route -n 2>/dev/null | grep -q "^$ip " && continue
+        route add -host "$ip" reject 2>/dev/null || ip route add unreachable "$ip/32" 2>/dev/null \
+            || log warn "route_block_failed_$ip"
+    done
+fi
+BLOCK_ARG=""
+[ -f "$BASE/blocklist" ] && BLOCK_ARG="-b $BASE/blocklist"
+
 (
     fails=0
     while true; do
@@ -65,7 +76,7 @@ grep -q "[[:space:]]$UPSTREAM\$" /tmp/hosts || echo "127.0.0.1 $UPSTREAM" >> /tm
         fi
         started=$(date +%s)
         "$BASE/yi-tls-bridge" -c "$BASE/server.crt" -k "$BASE/server.key" \
-            -a "$BASE/ca-bundle.pem" -u "$UPSTREAM" -r "$UPRESOLV" -d >> "$LOG" 2>&1 &
+            -a "$BASE/ca-bundle.pem" -u "$UPSTREAM" -r "$UPRESOLV" -d $BLOCK_ARG >> "$LOG" 2>&1 &
         bpid=$!
         sleep 2
         while kill -0 "$bpid" 2>/dev/null; do

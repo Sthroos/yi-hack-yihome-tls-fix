@@ -117,7 +117,26 @@ impersonate `api.eu.xiaoyi.com`. They then receive what `cloudAPI` sends:
 Live video itself runs over a separate P2P channel (`"p2p_encrypt":"true"`).
 What leaks is the credentials that grant access to it.
 
-## 4. Other notes
+## 4. Other findings in the 2026 firmware
+
+* **SD-card factory hook:** `init.sh` and `dispatch` run
+  `/tmp/sd/Factory/factory_test.sh` (and read `/tmp/sd/Factory/wpa_supplicant.conf`)
+  at boot if present. Physical access to the SD card means root.
+* **Log bundles contain the Wi-Fi password:** `dispatch`, `rmm` and `crypt_file`
+  build `/tmp/sd/log_<x>.tar.gz` including `/tmp/wpa_supplicant.conf`.
+  Upload endpoints in `cloud` / `p2p_tnp`: `https://hch.xiaoyi.com:9443/upload/log`
+  and `http://hch.xiaoyi.com:8443/upload/log`, plus a `send_debug_info` routine.
+  Whether Yi can trigger an upload remotely could not be determined from strings alone.
+* **Plain-HTTP endpoints:** `http://101.132.254.51:8081` (monitor/gather
+  telemetry, hardcoded IP), `http://log.{eu,us}.xiaoyi.com`,
+  `http://yicamera-router.mi-ae.com.sg/v1/ipc/router`, a `bindtrack` beacon with
+  `bind_key=` in the URL, and firmware mirrors (`download.xiaoyi.com`,
+  Cloudfront, Qiniu, `115.28.170.6:8084`). The OTA image is RSA-signed, so
+  the HTTP download itself cannot be tampered with undetected.
+* **Leftovers:** test endpoints (`familymonitor-interface-test.mi-ae.com.sg`)
+  and Xiaomi router integration (`miwifi.com`).
+
+## 5. Other notes
 
 * yi-hack replaces `/home/app/cloudAPI` with a wrapper (bind mount) that
   calls `/home/yi-hack/bin/cloudAPI_real`, or `cloudAPI_fake` when

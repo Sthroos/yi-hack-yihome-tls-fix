@@ -1,0 +1,23 @@
+# Names the camera may not resolve (answered NXDOMAIN by the bridge's DNS).
+# One name per line; a leading dot ('.example.com') also covers all subdomains.
+# Edit, then re-run install.sh and reboot.
+
+# Diagnostics upload: log bundles include /tmp/wpa_supplicant.conf (Wi-Fi password)
+hch.xiaoyi.com
+monitor-log.xiaoyi.com
+
+# Logging / telemetry
+log.xiaoyi.com
+log.eu.xiaoyi.com
+log.us.xiaoyi.com
+log.xiaoyi.com.tw
+yicamera-router.mi-ae.com.sg
+familymonitor-interface-test.mi-ae.com.sg
+
+# Firmware downloads: the official update disables certificate verification
+download.xiaoyi.com
+download.eu.xiaoyi.com
+download.us.xiaoyi.com
+download.xiaoyi.com.tw
+yi-version.qiniudn.com
+ds51qrrlkjd6a.cloudfront.net

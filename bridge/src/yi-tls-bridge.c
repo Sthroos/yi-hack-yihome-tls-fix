@@ -66,6 +66,7 @@ struct config {
     const char *resolv_file;
     int         max_children;
     int         dns_enabled;
+    const char *blocklist_file;
 };
 
 /* Immutable after startup; shared copy-on-write with children. */
@@ -265,20 +266,20 @@ static int resolve_a(const char *resolv_file, const char *host, struct in_addr *
  * types -> empty NOERROR) and forward every other query unchanged.
  */
 
-static int dns_qname_equals(const uint8_t *msg, int len, int off, const char *host, int *end)
+/* Read the (uncompressed) question name; returns 0 and sets *end, or -1. */
+static int dns_read_qname(const uint8_t *msg, int len, int off, char *name, size_t cap, int *end)
 {
-    char name[256];
-    int pos = 0;
+    size_t pos = 0;
     while (off < len && msg[off] != 0) {
         int l = msg[off];
-        if ((l & 0xC0) != 0 || off + 1 + l > len || pos + l + 1 >= (int)sizeof(name)) {
+        if ((l & 0xC0) != 0 || off + 1 + l > len || pos + (size_t)l + 2 > cap) {
             return -1;              /* compression is not valid in a question */
         }
         if (pos > 0) {
             name[pos++] = '.';
         }
         memcpy(name + pos, msg + off + 1, (size_t)l);
-        pos += l;
+        pos += (size_t)l;
         off += l + 1;
     }
     if (off >= len) {
@@ -286,7 +287,59 @@ static int dns_qname_equals(const uint8_t *msg, int len, int off, const char *ho
     }
     name[pos] = '\0';
     *end = off + 1;
-    return strcasecmp(name, host) == 0 ? 1 : 0;
+    return 0;
+}
+
+/* ------------------------------------------------------------ blocklist */
+
+#define MAX_BLOCKED 128
+
+/* Immutable after startup. Entries starting with '.' match that domain and all subdomains. */
+static char g_blocked[MAX_BLOCKED][256];
+static int g_blocked_count;
+
+static void load_blocklist(const char *path)
+{
+    FILE *f = fopen(path, "r");
+    if (f == NULL) {
+        die("load_blocklist", strerror(errno));
+    }
+    char line[300];
+    while (fgets(line, sizeof(line), f) != NULL) {
+        char *p = line;
+        while (*p == ' ' || *p == '\t') {
+            p++;
+        }
+        size_t n = strcspn(p, " \t\r\n#");
+        if (n == 0) {
+            continue;
+        }
+        if (n >= sizeof(g_blocked[0]) || g_blocked_count >= MAX_BLOCKED) {
+            die("load_blocklist", "entry too long or too many entries");
+        }
+        memcpy(g_blocked[g_blocked_count], p, n);
+        g_blocked[g_blocked_count][n] = '\0';
+        g_blocked_count++;
+    }
+    fclose(f);
+}
+
+static int is_blocked(const char *name)
+{
+    size_t nlen = strlen(name);
+    for (int i = 0; i < g_blocked_count; i++) {
+        const char *b = g_blocked[i];
+        if (b[0] == '.') {
+            size_t blen = strlen(b);
+            if (strcasecmp(name, b + 1) == 0 ||
+                (nlen > blen && strcasecmp(name + nlen - blen, b) == 0)) {
+                return 1;
+            }
+        } else if (strcasecmp(name, b) == 0) {
+            return 1;
+        }
+    }
+    return 0;
 }
 
 static ssize_t dns_forward(const char *resolv_file, const uint8_t *q, size_t qlen, uint8_t *r, size_t rcap)
@@ -325,8 +378,8 @@ static void dns_server_loop(const struct config *cfg)
     if (fd < 0 || bind(fd, (struct sockaddr *)&la, sizeof(la)) != 0) {
         die("dns_listen", strerror(errno));
     }
-    log_json("info", "dns_started", "127.0.0.1:53 %s -> 127.0.0.1, rest via %s",
-             cfg->upstream_host, cfg->resolv_file);
+    log_json("info", "dns_started", "127.0.0.1:53 %s -> 127.0.0.1, %d blocked, rest via %s",
+             cfg->upstream_host, g_blocked_count, cfg->resolv_file);
 
     for (;;) {
         uint8_t q[512], r[1500];
@@ -338,9 +391,21 @@ static void dns_server_loop(const struct config *cfg)
         }
         int qd = (q[4] << 8) | q[5];
         int qend = 0;
-        int match = (qd == 1) ? dns_qname_equals(q, (int)qlen, 12, cfg->upstream_host, &qend) : 0;
+        char qname[256];
+        int parsed = (qd == 1) && dns_read_qname(q, (int)qlen, 12, qname, sizeof(qname), &qend) == 0
+                     && qend + 4 <= qlen;
 
-        if (match == 1 && qend + 4 <= qlen) {
+        if (parsed && is_blocked(qname)) {
+            int alen = qend + 4;
+            memcpy(r, q, (size_t)alen);
+            r[2] = 0x84 | (q[2] & 0x01);    /* QR, AA, keep RD */
+            r[3] = 0x83;                    /* RA, NXDOMAIN */
+            r[6] = 0; r[7] = 0; r[8] = 0; r[9] = 0; r[10] = 0; r[11] = 0;
+            sendto(fd, r, (size_t)alen, 0, (struct sockaddr *)&from, flen);
+            log_json("info", "dns_blocked", "%s", qname);
+            continue;
+        }
+        if (parsed && strcasecmp(qname, cfg->upstream_host) == 0) {
             int qtype = (q[qend] << 8) | q[qend + 1];
             int alen = qend + 4;
             memcpy(r, q, (size_t)alen);
@@ -643,7 +708,8 @@ static void usage(const char *argv0)
     fprintf(stderr,
             "usage: %s -c cert.pem -k key.pem -a ca-bundle.pem -u upstream-host\n"
             "          [-l 127.0.0.1] [-p 443] [-P 443] [-r /etc/resolv.conf] [-n 8] [-d]\n"
-            "  -d  also serve DNS on 127.0.0.1:53 (upstream host -> 127.0.0.1, rest forwarded via -r)\n",
+            "  -d  also serve DNS on 127.0.0.1:53 (upstream host -> 127.0.0.1, rest forwarded via -r)\n"
+            "  -b  with -d: answer NXDOMAIN for names in this file ('.example.com' = domain + subdomains)\n",
             argv0);
     exit(2);
 }
@@ -665,7 +731,7 @@ int main(int argc, char **argv)
         .resolv_file = "/etc/resolv.conf", .max_children = 8,
     };
     int opt;
-    while ((opt = getopt(argc, argv, "c:k:a:u:l:p:P:r:n:d")) != -1) {
+    while ((opt = getopt(argc, argv, "c:k:a:u:l:p:P:r:n:db:")) != -1) {
         switch (opt) {
         case 'c': cfg.cert_file = optarg; break;
         case 'k': cfg.key_file = optarg; break;
@@ -677,6 +743,7 @@ int main(int argc, char **argv)
         case 'r': cfg.resolv_file = optarg; break;
         case 'n': cfg.max_children = atoi(optarg); break;
         case 'd': cfg.dns_enabled = 1; break;
+        case 'b': cfg.blocklist_file = optarg; break;
         default: usage(argv[0]);
         }
     }
@@ -728,6 +795,12 @@ int main(int argc, char **argv)
     setsockopt(lfd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
     if (bind(lfd, (struct sockaddr *)&la, sizeof(la)) != 0 || listen(lfd, 16) != 0) {
         die("listen", strerror(errno));
+    }
+    if (cfg.blocklist_file != NULL) {
+        if (!cfg.dns_enabled) {
+            usage(argv[0]);
+        }
+        load_blocklist(cfg.blocklist_file);
     }
     if (cfg.dns_enabled) {
         pid_t dpid = fork();

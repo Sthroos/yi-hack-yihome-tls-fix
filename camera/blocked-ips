@@ -1,0 +1,7 @@
+# IP addresses hardcoded in the firmware (no DNS lookup, so DNS cannot block them).
+# start.sh adds a local "reject" route for each. One IPv4 address per line.
+
+# Plain-HTTP telemetry: http://101.132.254.51:8081/ipc/monitor/gather
+101.132.254.51
+# Legacy firmware download: http://115.28.170.6:8084/vfile/download/familymonitor/
+115.28.170.6

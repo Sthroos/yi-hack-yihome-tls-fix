@@ -133,6 +133,26 @@ Then check the Yi Home app, including **remotely over mobile data**.
 
 The log contains no URLs, request bodies or credentials.
 
+## Blocking telemetry, log uploads and firmware updates
+
+The bridge's DNS also enforces [`camera/blocklist`](camera/blocklist) (answered
+NXDOMAIN), and `start.sh` adds local reject routes for the hardcoded IPs in
+[`camera/blocked-ips`](camera/blocked-ips). Out of the box this blocks:
+
+* **diagnostic log uploads** (`hch.xiaoyi.com`, `monitor-log.xiaoyi.com`):
+  the firmware's log bundle includes `/tmp/wpa_supplicant.conf`, i.e. your
+  **Wi-Fi password**, and one upload URL is plain `http://`
+* **telemetry** (`log.*.xiaoyi.com`, `yicamera-router.mi-ae.com.sg`, and
+  `http://101.132.254.51:8081`, a hardcoded IP that DNS cannot block)
+* **firmware downloads** (`download.*.xiaoyi.com`, the CDN mirrors and
+  `115.28.170.6`), so nobody can accidentally install the official update
+  that disables certificate verification. The app may still *offer* the
+  update; installing it fails harmlessly.
+
+Edit the files, re-run `install.sh`, reboot. Blocked lookups appear in the log
+as `dns_blocked`. Everything works the same on any network, because nothing
+depends on your router.
+
 ## Uninstall
 
 On the camera:
@@ -238,8 +258,9 @@ The suite covers the legacy ciphers (AES128-SHA, AES128-SHA256,
 AES128-GCM-SHA256), trust via R46 and via the R3 cross-sign, **rejection** of a
 wrong hostname and of an untrusted root, retry after a stalled upstream
 handshake, and the DNS forwarder (A → 127.0.0.1, AAAA empty, other names
-forwarded, loopback nameservers skipped). All 10 pass on x86-64 and on the
-armhf binary under QEMU.
+forwarded, loopback nameservers skipped) and the blocklist (exact names,
+`.domain` suffix matching, no false positives on similar names). All 14 pass
+on x86-64 and on the armhf binary under QEMU.
 
 ## Security notes
 
@@ -251,6 +272,20 @@ armhf binary under QEMU.
 * Bridge logs never contain URLs or payloads. `cloudAPI` puts credentials in
   query strings.
 * `ca-bundle.pem` is copied from your PC. Re-run `install.sh` now and then to refresh it.
+
+## Other weaknesses of this camera
+
+What remains after this fix, from the firmware analysis and a camera's open ports:
+
+| Issue | Risk | What you can do |
+|---|---|---|
+| `p2p_tnp` (live view via the app) listens on UDP 0.0.0.0, a 2019 proprietary P2P stack | the largest unknown: similar P2P stacks in other brands have had severe flaws | can't be fixed here; for remote viewing without it, use RTSP over your own VPN |
+| `/tmp/sd/Factory/factory_test.sh` runs as root at boot if present | anyone with the SD card in hand gets root | physical security; matters most for cameras in shared places |
+| yi-hack web UI (80) and RTSP (554) are plain HTTP/RTSP | credentials readable on the local network | set a username/password (yi-hack option), keep cameras on an isolated network |
+| SSH (dropbear) with password login | brute force from the local network | use key-only login (see the yi-hack wiki) |
+| ONVIF WS-Discovery (3702/udp), mDNS (5353/udp) | the camera announces itself on the network | `ONVIF_WSDD=no` if your NVR/Home Assistant uses a fixed IP |
+| Devices on the same VLAN reach the camera directly | a compromised IoT gadget on the same Wi-Fi can probe the camera | client isolation on the SSID, or a dedicated camera VLAN that only allows LAN→camera and camera→internet |
+| Kernel 3.18, glibc 2.19, CyaSSL 3.3.0 (2014) | unmaintained; many known CVEs | CyaSSL now only talks to the bridge on 127.0.0.1; isolate the rest |
 
 ## License
 
