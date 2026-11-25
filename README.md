@@ -84,28 +84,31 @@ but are untested. Reports welcome.
 
 ## Install
 
+One command per camera, run from a Linux/macOS PC (or WSL):
+
 ```sh
 git clone https://github.com/Sthroos/yi-hack-yihome-tls-fix
 cd yi-hack-yihome-tls-fix
-
-# 1. Your own private CA + server certificate (once; reuse for all your cameras).
-#    The CA private key is destroyed after signing: it can never sign anything else.
-./scripts/make-certs.sh ./pki                    # other region: ./scripts/make-certs.sh ./pki api.us.xiaoyi.com
-
-# 2. Install on each camera
-./install.sh 192.168.1.50                        # other region: ./install.sh 192.168.1.50 api.us.xiaoyi.com
-
-# 3. Reboot the camera so everything starts in the right order
-ssh root@192.168.1.50 'reboot -f'
+./install.sh --reboot 192.168.1.50
 ```
 
-Find your region host in `ps | grep cloudAPI_real` on the camera (the `-url https://api.XX.xiaoyi.com/...` argument).
+You type the camera's root password once. `install.sh`:
 
-`install.sh`:
-1. copies the bridge, certificates, CA bundle and `start.sh` to `/tmp/sd/yi-hack/yi-tls-bridge/`
-2. appends your private CA to `/home/app/ca/gd_bundle-g2-g1.crt` and `/home/app/ca/ca.crt` (originals kept as `.orig`)
-3. adds one line to `/tmp/sd/yi-hack/startup.sh`
-4. starts the bridge, or tells you to reboot if an older version is already running
+1. runs **pre-flight checks**: yi-hack present, SD card mounted, cloud enabled,
+   and `cloudAPI_real` not replaced by the official update's non-verifying one
+2. **detects the API region** from the camera's running cloud calls
+   (falls back to `api.eu.xiaoyi.com`; override with a second argument, e.g. `api.us.xiaoyi.com`)
+3. on first use, **creates `./pki`**: your own private CA and a server certificate.
+   The CA private key is destroyed right after signing, so it can never sign
+   anything else. Later runs reuse `./pki` for all your cameras.
+4. copies the bridge, certificates, a CA bundle (from your PC) and `start.sh`
+   to `/tmp/sd/yi-hack/yi-tls-bridge/`
+5. appends your private CA to `/home/app/ca/gd_bundle-g2-g1.crt` and
+   `/home/app/ca/ca.crt` (originals kept as `.orig`)
+6. adds one line to `/tmp/sd/yi-hack/startup.sh` and reboots (`--reboot`)
+
+Re-running is safe: nothing is duplicated, and an update only takes effect
+after a reboot. To refresh the CA bundle later, run it again.
 
 ### Verify
 

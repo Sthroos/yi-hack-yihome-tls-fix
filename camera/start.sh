@@ -12,6 +12,7 @@
 #   - restores the original resolv.conf whenever the bridge is down, and gives
 #     up after 3 quick failures so the camera never stays without DNS.
 # Idempotent: a second invocation exits while the first supervisor lives.
+# The supervisor detaches its stdio so an SSH session that starts it can close.
 
 BASE="$(dirname "$0")"
 UPSTREAM="$(cat "$BASE/upstream_host" 2>/dev/null)"
@@ -80,4 +81,4 @@ grep -q "[[:space:]]$UPSTREAM\$" /tmp/hosts || echo "127.0.0.1 $UPSTREAM" >> /tm
         fi
         sleep 5
     done
-) &
+) </dev/null >/dev/null 2>&1 &
