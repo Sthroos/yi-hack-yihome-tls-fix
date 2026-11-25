@@ -1,0 +1,12 @@
+yi-hack-yihome-tls-fix
+Copyright 2026 Sthroos and contributors
+
+This product includes software developed as part of Mbed TLS
+(https://github.com/Mbed-TLS/mbedtls), licensed under the Apache License 2.0.
+The prebuilt binary dist/yi-tls-bridge-armhf statically links Mbed TLS 3.6.2
+and glibc (LGPL-2.1+); the corresponding source is available from those projects
+and bridge/build.sh rebuilds the binary from source.
+
+This project is not affiliated with, endorsed by, or supported by Kami Vision /
+YI Technology or the yi-hack projects. "Yi" and "Yi Home" are trademarks of
+their respective owners.

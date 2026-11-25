@@ -1,0 +1,29 @@
+# Alternative to the on-camera bridge: a TLS-terminating proxy on a host in your
+# LAN, plus a router DNAT rule. See README "Alternative: network proxy".
+#   PROXY_BIND_IP=192.168.x.y PROXY_DIR=/opt/yi-cloud-proxy docker compose up -d
+services:
+  yi-cloud-proxy:
+    image: nginxinc/nginx-unprivileged:1.27.3-alpine   # >= 1.27.3 needed for upstream "resolve"
+    container_name: yi-cloud-proxy
+    restart: unless-stopped
+    user: "101:101"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    ports:
+      # Bind to one LAN address only; the router DNATs camera traffic here.
+      - "${PROXY_BIND_IP:?set PROXY_BIND_IP}:8443:8443"
+    volumes:
+      - ${PROXY_DIR:?set PROXY_DIR}/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ${PROXY_DIR}/pki/server.crt:/certs/server.crt:ro
+      - ${PROXY_DIR}/pki/server.key:/certs/server.key:ro
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8081/healthz"]
+      interval: 60s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
